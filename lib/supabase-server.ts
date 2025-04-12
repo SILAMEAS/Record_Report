@@ -124,38 +124,59 @@ export async function getAllContent({
     return { contents: [], total: 0 };
   }
 }
+// Fetch a single content item by ID
 export async function getContentById(id: string): Promise<ContentType | null> {
   try {
-    const { data, error } = await supabase.from("contents").select("*").eq("id", id).single();
+    const { data, error } = await supabase
+      .from("contents")
+      .select("*")
+      .eq("id", id)
+      .single();
 
     if (error) {
-      if (error.code === "PGRST116") {
-        return null; // Content not found
-      }
-      console.error(`Error fetching content by ID ${id}:`, error);
+      console.error(`Error fetching content with ID ${id}:`, error);
       if (process.env.NODE_ENV === "development") {
-        throw new Error(`Failed to fetch content by ID: ${error.message}`);
+        throw new Error(`Failed to fetch content: ${error.message}`);
       }
       return null;
     }
 
-    // Generate signed URL for main_image if the bucket is private
-    if (data?.main_image) {
-      const { data: signedUrlData, error: signedUrlError } = await supabase.storage
-        .from("content-images")
-        .createSignedUrl(data.main_image, 60 * 60); // URL valid for 1 hour
+    if (!data) {
+      return null;
+    }
 
-      if (signedUrlError) {
-        console.error("Error generating signed URL:", signedUrlError);
-        return { ...data, main_image: null };
+    // Log the raw data before processing
+    console.log("Raw content data:", data);
+
+    // Generate public URL for main_image since the bucket is public
+    if (data.main_image) {
+      let fileName = data.main_image;
+
+      // If main_image is a full URL, extract the file name
+      if (data.main_image.startsWith("https://")) {
+        try {
+          const url = new URL(data.main_image);
+          const pathSegments = url.pathname.split("/content-images/");
+          if (pathSegments.length > 1) {
+            fileName = pathSegments[1]; // Extract the file name (e.g., "1744446128104-main.png")
+          }
+        } catch (error) {
+          console.error(`Failed to parse main_image URL: ${data.main_image}`, error);
+          return { ...data, main_image: null }; // Fallback to null if URL parsing fails
+        }
       }
 
-      return { ...data, main_image: signedUrlData.signedUrl };
+      const { data: publicUrlData } = supabase.storage
+        .from("content-images")
+        .getPublicUrl(fileName);
+
+      console.log(`Public URL for ${fileName}: ${publicUrlData.publicUrl}`);
+      return { ...data, main_image: publicUrlData.publicUrl };
     }
 
     return data;
   } catch (error) {
-    console.error(`Unexpected error in getContentById (id: ${id}):`, error);
+    console.error(`Unexpected error in getContentById (ID ${id}):`, error);
     if (process.env.NODE_ENV === "development") {
       throw error;
     }
