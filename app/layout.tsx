@@ -1,15 +1,15 @@
-import type React from "react"
-import type { Metadata } from "next"
+// Remove 'use client' directive from here, since `metadata` is server-side logic
 import { Inter } from "next/font/google"
-import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
+import './globals.css'
 
-const inter = Inter({ subsets: ["latin"] })
+const inter = Inter({ subsets: ['latin'] })
 
-export const metadata: Metadata = {
-  title: "Content Management with Cloudinary",
-  description: "A Next.js application for managing content with Cloudinary images",
-    generator: 'v0.dev'
+// Metadata is a server-side only export
+export const metadata = {
+  title: 'Content Management with Cloudinary',
+  description: 'A Next.js application for managing content with Cloudinary images',
+  generator: 'v0.dev'
 }
 
 export default function RootLayout({
@@ -27,6 +27,3 @@ export default function RootLayout({
     </html>
   )
 }
-
-
-import './globals.css'
