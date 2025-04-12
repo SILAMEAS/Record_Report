@@ -1,106 +1,164 @@
-import { createClient } from "@supabase/supabase-js"
-import type { ContentType } from "./types"
+import { createClient } from "@supabase/supabase-js";
+import type { ContentType } from "./types";
 
-// Get environment variables with fallbacks
-const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || ""
-const supabaseKey =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.SUPABASE_ANON_KEY ||
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  ""
+// Get environment variables
+const supabaseUrl = process.env.SUPABASE_URL || "";
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 
-// Log environment variable status for debugging (will only show in server logs)
-console.log("Supabase URL available:", !!supabaseUrl)
-console.log("Supabase Key available:", !!supabaseKey)
+if (!supabaseUrl || !supabaseServiceRoleKey) {
+  throw new Error(
+    "Missing Supabase credentials. Ensure SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are set in environment variables."
+  );
+}
 
-// Create a supabase client for server components with error handling
-export const supabase = createClient(supabaseUrl, supabaseKey, {
+console.log("Supabase URL available:", !!supabaseUrl);
+console.log("Supabase Service Role Key available:", !!supabaseServiceRoleKey);
+
+// Create a Supabase client for server components
+export const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
   auth: {
     persistSession: false,
   },
-})
+});
 
 // Initialize storage bucket if it doesn't exist
 export async function initializeStorage() {
-  if (!supabaseUrl || !supabaseKey) {
-    console.error("Supabase credentials not available, skipping storage initialization")
-    return
-  }
-
   try {
-    // Check if the bucket exists
-    const { data: buckets, error } = await supabase.storage.listBuckets()
+    const { data: buckets, error } = await supabase.storage.listBuckets();
 
     if (error) {
-      console.error("Error listing buckets:", error)
-      return
+      console.error("Error listing buckets:", error);
+      throw error;
     }
 
-    const bucketName = "content-images"
+    const bucketName = "content-images";
 
     if (!buckets?.find((bucket) => bucket.name === bucketName)) {
-      // Create the bucket if it doesn't exist
       const { error: createError } = await supabase.storage.createBucket(bucketName, {
-        public: true, // Make the bucket public
-      })
+        public: false, // Make the bucket private
+      });
 
       if (createError) {
-        console.error("Error creating bucket:", createError)
-      } else {
-        console.log("Bucket created successfully")
+        console.error("Error creating bucket:", createError);
+        throw createError;
       }
+
+      console.log("Bucket created successfully:", bucketName);
+    } else {
+      console.log("Bucket already exists:", bucketName);
     }
   } catch (error) {
-    console.error("Error initializing storage:", error)
+    console.error("Error initializing storage:", error);
+    throw error;
   }
 }
 
-export async function getAllContent(): Promise<ContentType[]> {
-  if (!supabaseUrl || !supabaseKey) {
-    console.error("Supabase credentials not available, returning empty content array")
-    return []
-  }
-
+export async function getAllContent({
+  page = 1,
+  limit = 9,
+}: { page?: number; limit?: number } = {}): Promise<{
+  contents: ContentType[];
+  total: number;
+}> {
   try {
-    const { data, error } = await supabase.from("contents").select("*").order("created_at", { ascending: false })
+    const start = (page - 1) * limit;
+    const end = start + limit - 1;
+
+    const { data, error } = await supabase
+      .from("contents")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .range(start, end);
 
     if (error) {
-      console.error("Error fetching content:", error)
-      return []
+      console.error(`Error fetching content (page ${page}, limit ${limit}):`, error);
+      if (process.env.NODE_ENV === "development") {
+        throw new Error(`Failed to fetch content: ${error.message}`);
+      }
+      return { contents: [], total: 0 };
     }
 
-    return data || []
+    const { count, error: countError } = await supabase
+      .from("contents")
+      .select("*", { count: "exact", head: true });
+
+    if (countError) {
+      console.error("Error fetching content count:", countError);
+      if (process.env.NODE_ENV === "development") {
+        throw new Error(`Failed to fetch content count: ${countError.message}`);
+      }
+      return { contents: data || [], total: 0 };
+    }
+
+    // Log the raw data before processing
+    console.log("Raw content data:", data);
+
+    // Generate public URLs for main_image since the bucket is public
+    const contentsWithPublicUrls = (data || []).map((content) => {
+      if (content.main_image) {
+        // If main_image is a full URL, extract the file name
+        let fileName = content.main_image;
+        if (content.main_image.startsWith("https://")) {
+          const match = content.main_image.match(/content-images\/(.+)/);
+          if (match) {
+            fileName = match[1]; // Extract the file name (e.g., "1744446128104-main.png")
+          }
+        }
+
+        const { data: publicUrlData } = supabase.storage
+          .from("content-images")
+          .getPublicUrl(fileName);
+
+        console.log(`Public URL for ${fileName}: ${publicUrlData.publicUrl}`);
+        return { ...content, main_image: publicUrlData.publicUrl };
+      }
+      return content;
+    });
+
+    return { contents: contentsWithPublicUrls, total: count || 0 };
   } catch (error) {
-    console.error("Error in getAllContent:", error)
-    return []
+    console.error(`Unexpected error in getAllContent (page ${page}, limit ${limit}):`, error);
+    if (process.env.NODE_ENV === "development") {
+      throw error;
+    }
+    return { contents: [], total: 0 };
   }
 }
-
 export async function getContentById(id: string): Promise<ContentType | null> {
-  if (!supabaseUrl || !supabaseKey) {
-    console.error("Supabase credentials not available, returning null content")
-    return null
-  }
-
   try {
-    const { data, error } = await supabase.from("contents").select("*").eq("id", id).single()
+    const { data, error } = await supabase.from("contents").select("*").eq("id", id).single();
 
     if (error) {
       if (error.code === "PGRST116") {
-        return null // Content not found
+        return null; // Content not found
       }
-      console.error("Error fetching content by ID:", error)
-      return null
+      console.error(`Error fetching content by ID ${id}:`, error);
+      if (process.env.NODE_ENV === "development") {
+        throw new Error(`Failed to fetch content by ID: ${error.message}`);
+      }
+      return null;
     }
 
-    return data
-  } catch (error) {
-    console.error("Error in getContentById:", error)
-    return null
-  }
-}
+    // Generate signed URL for main_image if the bucket is private
+    if (data?.main_image) {
+      const { data: signedUrlData, error: signedUrlError } = await supabase.storage
+        .from("content-images")
+        .createSignedUrl(data.main_image, 60 * 60); // URL valid for 1 hour
 
-// Initialize storage when this module is imported
-if (supabaseUrl && supabaseKey) {
-  initializeStorage().catch(console.error)
+      if (signedUrlError) {
+        console.error("Error generating signed URL:", signedUrlError);
+        return { ...data, main_image: null };
+      }
+
+      return { ...data, main_image: signedUrlData.signedUrl };
+    }
+
+    return data;
+  } catch (error) {
+    console.error(`Unexpected error in getContentById (id: ${id}):`, error);
+    if (process.env.NODE_ENV === "development") {
+      throw error;
+    }
+    return null;
+  }
 }

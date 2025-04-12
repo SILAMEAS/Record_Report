@@ -1,11 +1,11 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { useRouter } from "next/navigation"
-import { Button } from "@/components/ui/button"
-import { Trash2, Loader2 } from "lucide-react"
-import { useToast } from "@/hooks/use-toast"
-import { deleteContentClient } from "@/lib/supabase-client"
+import { useState } from "react";
+import { useRouter } from "next/navigation"; // Use next/navigation in App Router
+import { Button } from "@/components/ui/button";
+import { Trash2, Loader2 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { deleteContentClient } from "@/lib/supabase-client";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,47 +16,67 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
+} from "@/components/ui/alert-dialog";
 
 interface DeleteButtonProps {
-  id: string
+  id: string;
+  title: string;
 }
 
-export function DeleteButton({ id }: DeleteButtonProps) {
-  const router = useRouter()
-  const { toast } = useToast()
-  const [isDeleting, setIsDeleting] = useState(false)
+export function DeleteButton({ id, title }: DeleteButtonProps) {
+  const router = useRouter();
+  const { toast } = useToast();
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const handleDelete = async () => {
     try {
-      setIsDeleting(true)
-      const success = await deleteContentClient(id)
+      setIsDeleting(true);
+      const success = await deleteContentClient(id);
 
       if (success) {
         toast({
           title: "Success",
-          description: "Content deleted successfully",
-        })
-        router.refresh()
+          description: `Content "${title}" deleted successfully.`,
+        });
+        router.refresh(); // Refresh the page to re-fetch data
       } else {
-        throw new Error("Failed to delete content")
+        throw new Error("Failed to delete content");
       }
     } catch (error) {
+      let errorMessage = "Failed to delete content.";
+      if (error instanceof Error) {
+        if (error.message.includes("Network")) {
+          errorMessage = "Network error. Please check your connection and try again.";
+        } else if (error.message.includes("permission")) {
+          errorMessage = "You do not have permission to delete this content.";
+        } else {
+          errorMessage = error.message;
+        }
+      }
       toast({
         title: "Error",
-        description: error instanceof Error ? error.message : "Failed to delete content",
+        description: errorMessage,
         variant: "destructive",
-      })
+      });
     } finally {
-      setIsDeleting(false)
+      setIsDeleting(false);
     }
-  }
+  };
 
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
-        <Button variant="destructive" size="sm">
-          <Trash2 className="h-4 w-4 mr-2" />
+        <Button
+          variant="destructive"
+          size="sm"
+          disabled={isDeleting}
+          aria-label={`Delete ${title}`}
+        >
+          {isDeleting ? (
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+          ) : (
+            <Trash2 className="h-4 w-4 mr-2" />
+          )}
           Delete
         </Button>
       </AlertDialogTrigger>
@@ -64,11 +84,11 @@ export function DeleteButton({ id }: DeleteButtonProps) {
         <AlertDialogHeader>
           <AlertDialogTitle>Are you sure?</AlertDialogTitle>
           <AlertDialogDescription>
-            This will permanently delete this content and remove all associated images.
+            This will permanently delete the content "{title}" and remove all associated images.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
           <AlertDialogAction onClick={handleDelete} disabled={isDeleting}>
             {isDeleting ? (
               <>
@@ -82,5 +102,5 @@ export function DeleteButton({ id }: DeleteButtonProps) {
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
-  )
+  );
 }

@@ -132,7 +132,6 @@ export function ContentForm({ content }: ContentFormProps) {
           description: content ? "Content updated successfully" : "Content created successfully",
         })
       }
-
       router.push("/")
       router.refresh()
     } catch (error) {
