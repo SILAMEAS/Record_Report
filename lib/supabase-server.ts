@@ -53,10 +53,12 @@ export async function initializeStorage() {
   }
 }
 
+// Fetch all content items with optional search
 export async function getAllContent({
   page = 1,
   limit = 9,
-}: { page?: number; limit?: number } = {}): Promise<{
+  search = "",
+}: { page?: number; limit?: number; search?: string } = {}): Promise<{
   contents: ContentType[];
   total: number;
 }> {
@@ -64,23 +66,42 @@ export async function getAllContent({
     const start = (page - 1) * limit;
     const end = start + limit - 1;
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("contents")
       .select("*")
-      .order("created_at", { ascending: false })
-      .range(start, end);
+      .order("created_at", { ascending: false });
+
+    // Add search filter if search term is provided
+    if (search) {
+      const searchTerm = `%${search}%`;
+      query = query.or(
+        `title.ilike.${searchTerm},description.ilike.${searchTerm}`
+      );
+    }
+
+    const { data, error } = await query.range(start, end);
 
     if (error) {
-      console.error(`Error fetching content (page ${page}, limit ${limit}):`, error);
+      console.error(`Error fetching content (page ${page}, limit ${limit}, search ${search}):`, error);
       if (process.env.NODE_ENV === "development") {
         throw new Error(`Failed to fetch content: ${error.message}`);
       }
       return { contents: [], total: 0 };
     }
 
-    const { count, error: countError } = await supabase
+    let countQuery = supabase
       .from("contents")
       .select("*", { count: "exact", head: true });
+
+    // Apply the same search filter to the count query
+    if (search) {
+      const searchTerm = `%${search}%`;
+      countQuery = countQuery.or(
+        `title.ilike.${searchTerm},description.ilike.${searchTerm}`
+      );
+    }
+
+    const { count, error: countError } = await countQuery;
 
     if (countError) {
       console.error("Error fetching content count:", countError);
@@ -96,12 +117,19 @@ export async function getAllContent({
     // Generate public URLs for main_image since the bucket is public
     const contentsWithPublicUrls = (data || []).map((content) => {
       if (content.main_image) {
-        // If main_image is a full URL, extract the file name
         let fileName = content.main_image;
+
+        // If main_image is a full URL, extract the file name
         if (content.main_image.startsWith("https://")) {
-          const match = content.main_image.match(/content-images\/(.+)/);
-          if (match) {
-            fileName = match[1]; // Extract the file name (e.g., "1744446128104-main.png")
+          try {
+            const url = new URL(content.main_image);
+            const pathSegments = url.pathname.split("/content-images/");
+            if (pathSegments.length > 1) {
+              fileName = pathSegments[1]; // Extract the file name (e.g., "1744446128104-main.png")
+            }
+          } catch (error) {
+            console.error(`Failed to parse main_image URL: ${content.main_image}`, error);
+            return { ...content, main_image: null }; // Fallback to null if URL parsing fails
           }
         }
 
@@ -117,7 +145,7 @@ export async function getAllContent({
 
     return { contents: contentsWithPublicUrls, total: count || 0 };
   } catch (error) {
-    console.error(`Unexpected error in getAllContent (page ${page}, limit ${limit}):`, error);
+    console.error(`Unexpected error in getAllContent (page ${page}, limit ${limit}, search ${search}):`, error);
     if (process.env.NODE_ENV === "development") {
       throw error;
     }

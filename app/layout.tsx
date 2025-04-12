@@ -7,7 +7,7 @@ import { ThemeProvider } from "@/components/theme-provider"
 const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "Content Management with Cloudinary",
+  title: "Sila Record Report",
   description: "A Next.js application for managing content with Cloudinary images",
     generator: 'v0.dev'
 }
